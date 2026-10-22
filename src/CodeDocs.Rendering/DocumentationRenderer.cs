@@ -12,8 +12,23 @@ internal sealed class DocumentationRenderer(Func<string, string?> link, bool htm
     public static string Summary(DocumentationComment comment)
     {
         if (string.IsNullOrWhiteSpace(comment.Xml)) return "";
-        try { return Regex.Replace(XElement.Parse(comment.Xml).Element("summary")?.Value ?? "", @"\s+", " ").Trim(); }
+        try { return Regex.Replace(string.Concat(XElement.Parse(comment.Xml).Element("summary")?.Nodes().Select(SummaryText) ?? []), @"\s+", " ").Trim(); }
         catch (System.Xml.XmlException) { return ""; }
+    }
+    private static string SummaryText(XNode node)
+    {
+        if (node is XText text) return text.Value;
+        if (node is not XElement element) return "";
+        if (element.Name.LocalName is "see" or "seealso")
+        {
+            if (!string.IsNullOrWhiteSpace(element.Value)) return element.Value;
+            var cref = element.Attribute("cref")?.Value;
+            return element.Attribute("langword")?.Value ?? (cref is { Length: > 2 } && cref[1] == ':' ? cref[2..] : cref)
+                ?? element.Attribute("href")?.Value ?? "";
+        }
+        if (element.Name.LocalName is "paramref" or "typeparamref") return element.Attribute("name")?.Value ?? "";
+        var content = string.Concat(element.Nodes().Select(SummaryText));
+        return element.Name.LocalName == "para" ? " " + content + " " : content;
     }
     public string Render(DocumentationComment comment)
     {
