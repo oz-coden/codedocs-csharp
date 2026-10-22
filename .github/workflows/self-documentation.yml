@@ -1,0 +1,41 @@
+name: Self documentation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  self-documentation:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: dotnet build CodeDocs.CSharp.sln -c Release
+      - run: dotnet pack src/CodeDocs.Cli -c Release --no-build -o artifacts/packages
+      - run: dotnet tool install --tool-path artifacts/tool CodeDocs.CSharp --version 0.1.0 --add-source ./artifacts/packages
+      - name: Document all symbols using the installed tool
+        shell: bash
+        run: artifacts/tool/codedocs build CodeDocs.CSharp.sln --visibility all --format html --format markdown --format json --single-file -o artifacts/self-all
+      - name: Repeat the same generation
+        shell: bash
+        run: artifacts/tool/codedocs build CodeDocs.CSharp.sln --visibility all --format html --format markdown --format json --single-file -o artifacts/self-repeat
+      - name: Document public API with multi-file Markdown
+        shell: bash
+        run: artifacts/tool/codedocs build CodeDocs.CSharp.sln --visibility public --format html --format markdown --format json -o artifacts/self-public
+      - name: Validate generated snapshots
+        run: python scripts/verify_snapshot.py artifacts/self-all artifacts/self-repeat artifacts/self-public
+      - uses: actions/upload-artifact@v4
+        with:
+          name: self-documentation-${{ matrix.os }}
+          path: |
+            artifacts/self-all/
+            artifacts/self-public/
+          retention-days: 14
