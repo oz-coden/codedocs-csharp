@@ -15,6 +15,7 @@ public sealed record AttributeDocument(string Display, TypeReference? Type, stri
     IReadOnlyList<string> ConstructorArguments, IReadOnlyDictionary<string, string> NamedArguments);
 public sealed record GenericParameterDocument(string Name, string Variance, IReadOnlyList<TextPart> Constraints,
     IReadOnlyList<string> ConstraintItems, IReadOnlyList<AttributeDocument> Attributes);
+public sealed record AccessorDocument(string Kind, string Accessibility, IReadOnlyList<AttributeDocument> Attributes, IReadOnlyList<string> Modifiers);
 public sealed record ParameterDocument(string Name, TypeReference Type, string RefKind, string ScopedKind,
     bool IsParams, bool IsOptional, string? DefaultValue, IReadOnlyList<AttributeDocument> Attributes);
 public sealed record Relationship(string Kind, TypeReference Type, string? MemberId = null);
@@ -47,6 +48,7 @@ public sealed record MemberDocument : SymbolDocument
     public IReadOnlyList<ParameterDocument> Parameters { get; init; } = [];
     public IReadOnlyList<string> ExplicitImplementations { get; init; } = [];
     public IReadOnlyList<string> Accessors { get; init; } = [];
+    public IReadOnlyList<AccessorDocument> AccessorDetails { get; init; } = [];
     public string? ConstantValue { get; init; }
     public string? ReturnRefKind { get; init; }
     public bool IsExtensionMethod { get; init; }
@@ -64,6 +66,7 @@ public sealed record TypeDocument : SymbolDocument
     public IReadOnlyList<TypeReference> Interfaces { get; init; } = [];
     public IReadOnlyList<MemberDocument> Members { get; init; } = [];
     public IReadOnlyList<InheritedMemberDocument> InheritedMembers { get; init; } = [];
+    public MemberDocument? DelegateSignature { get; init; }
 }
 
 public sealed record NamespaceDocument(string Name, IReadOnlyList<string> TypeIds);

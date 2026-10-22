@@ -20,3 +20,6 @@ jobs:
       - run: dotnet restore samples/Example/Example.csproj
       - run: dotnet run --project src/CodeDocs.Cli -c Release --no-build -- build samples/Example/Example.csproj --format html --format markdown --format json --single-file -o artifacts/example
       - run: dotnet pack src/CodeDocs.Cli -c Release --no-build -o artifacts/packages
+      - run: dotnet tool install --tool-path artifacts/tool CodeDocs.CSharp --version 0.1.0 --add-source ./artifacts/packages
+      - shell: bash
+        run: artifacts/tool/codedocs --version

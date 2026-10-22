@@ -18,7 +18,7 @@ Only symbols included in the selected documentation snapshot receive links. Disp
 
 ## Information preservation
 
-The model retains raw and expanded documentation XML, resolved cref references, attributes including constructor/named arguments and return targets, parameter flags, extension targets, generic constraints and attributes, declaration locations, declaration headers, generated-source hints, accessor information, and implicit-declaration flags. Source declaration locations on members allow clients to group a merged partial type by declaration file.
+The model retains raw and expanded documentation XML, resolved cref references, attributes including constructor/named arguments and return targets, parameter flags, extension targets, generic constraints and attributes, accessor attributes, delegate signatures, declaration locations, declaration headers, generated-source hints, accessor information, and implicit-declaration flags. Source declaration locations on members allow clients to group a merged partial type by declaration file.
 
 Display filtering is applied consistently to the exported snapshot and link index. It does not change the underlying compilation. Generated declarations and compiler-synthesized API members are considered alongside source-written declarations.
 
@@ -35,7 +35,7 @@ The HTML search index has both JSON and script representations. The script repre
 3. Stop for Fatal, or Partial with keep-existing/fail.
 4. Acquire an exclusive output lock and validate the destination.
 5. Render every selected format into a sibling staging directory.
-6. Validate required entrypoints and nonempty files.
+6. Validate required entrypoints, nonempty files, and HTML link targets/anchors.
 7. Rename an existing destination to a sibling backup.
 8. Rename staging to destination; restore the backup if this fails.
 9. Remove the backup after the new snapshot is committed.

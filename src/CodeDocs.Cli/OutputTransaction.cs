@@ -30,7 +30,8 @@ public sealed class OutputTransaction : IDisposable
         {
             if (Directory.Exists(destination))
             {
-                if (Directory.Exists(Path.Combine(destination, ".git")) || Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Any(f => Path.GetExtension(f).ToLowerInvariant() is ".cs" or ".csproj" or ".sln"))
+                ValidateExistingTree(destination);
+                if (File.Exists(Path.Combine(destination, ".git")) || Directory.Exists(Path.Combine(destination, ".git")) || Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Any(f => Path.GetExtension(f).ToLowerInvariant() is ".cs" or ".csproj" or ".sln"))
                     throw new ArgumentExceptionWithUsage("Output contains source files or a Git repository; choose a dedicated documentation directory.");
                 var marker = Path.Combine(destination, Marker);
                 if (File.Exists(marker))
@@ -55,6 +56,16 @@ public sealed class OutputTransaction : IDisposable
             if ((File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
                 throw new ArgumentExceptionWithUsage("Output paths must not contain symbolic links or reparse points.");
     }
+    private static void ValidateExistingTree(string directory)
+    {
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        {
+            var attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+                throw new ArgumentExceptionWithUsage("Existing output contains symbolic links or reparse points.");
+            if ((attributes & FileAttributes.Directory) != 0) ValidateExistingTree(entry);
+        }
+    }
     public async Task RenderAsync(SolutionDocument document, BuildOptions options, CancellationToken cancellationToken = default)
     {
         await SiteRenderer.RenderAsync(document, options, staging, cancellationToken);
@@ -66,6 +77,7 @@ public sealed class OutputTransaction : IDisposable
             var entry = format switch { "html" => "index.html", "markdown" => options.SingleFile ? "api.md" : "README.md", _ => "api.json" };
             if (!File.Exists(Path.Combine(root, entry))) throw new IOException("Missing output entry: " + entry);
         }
+        OutputValidator.Validate(staging);
         File.WriteAllText(Path.Combine(staging, Marker), "{\n  \"generator\": \"CodeDocs.CSharp\",\n  \"version\": \"0.1.0\"\n}\n");
     }
     public void Commit()

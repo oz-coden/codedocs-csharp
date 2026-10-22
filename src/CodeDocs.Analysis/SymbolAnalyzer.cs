@@ -202,7 +202,8 @@ public sealed class SymbolAnalyzer
             GenericParameters = Generics(type.TypeParameters), Relationships = relationships,
             IsImplicitlyDeclared = type.IsImplicitlyDeclared, ContainingTypeId = Resolve(type.ContainingType),
             BaseType = type.BaseType is null ? null : TypeRef(type.BaseType), Interfaces = type.Interfaces.Select(TypeRef).ToArray(),
-            Members = members, InheritedMembers = Inherited(type)
+            Members = members, InheritedMembers = Inherited(type),
+            DelegateSignature = type.DelegateInvokeMethod is null ? null : BuildMember(type.DelegateInvokeMethod)
         };
     }
 
@@ -288,6 +289,7 @@ public sealed class SymbolAnalyzer
             ValueType = valueType is null ? null : TypeRef(valueType), Parameters = parameters.Select(Parameter).ToArray(),
             ExplicitImplementations = ExplicitSymbols(symbol).Select(s => Resolve(s) ?? s.GetDocumentationCommentId() ?? s.ToDisplayString()).ToArray(),
             Accessors = property is null ? [] : Accessors(property),
+            AccessorDetails = AccessorSymbols(symbol).Select(a => new AccessorDocument(a.MethodKind.ToString(), AccessibilityText(a), Attributes(a), Modifiers(a))).ToArray(),
             ConstantValue = symbol is IFieldSymbol { HasConstantValue: true } field ? Constant(field.ConstantValue) : null,
             ReturnRefKind = method?.RefKind.ToString() ?? property?.RefKind.ToString(),
             IsExtensionMethod = method?.IsExtensionMethod ?? false,
@@ -296,6 +298,12 @@ public sealed class SymbolAnalyzer
         };
     }
 
+    private static IEnumerable<IMethodSymbol> AccessorSymbols(ISymbol symbol) => (symbol switch
+    {
+        IPropertySymbol p => new[] { p.GetMethod, p.SetMethod },
+        IEventSymbol e => new[] { e.AddMethod, e.RemoveMethod, e.RaiseMethod },
+        _ => Array.Empty<IMethodSymbol?>()
+    }).OfType<IMethodSymbol>();
     private static IReadOnlyList<string> Accessors(IPropertySymbol property) => new[] { property.GetMethod, property.SetMethod }.Where(m => m is not null).Select(m =>
         (m!.DeclaredAccessibility != property.DeclaredAccessibility ? AccessibilityText(m) + " " : "") +
         (m.MethodKind == MethodKind.PropertyGet ? "get;" : m.IsInitOnly ? "init;" : "set;")).ToArray();
@@ -323,10 +331,10 @@ public sealed class SymbolAnalyzer
             foreach (var token in tokens) set.Add(token.ValueText);
         }
         if (symbol.IsStatic) set.Add("static");
-        if (symbol.IsAbstract) set.Add("abstract");
+        if (symbol.IsAbstract && symbol is not INamedTypeSymbol { IsStatic: true } && symbol is not INamedTypeSymbol { TypeKind: TypeKind.Interface }) set.Add("abstract");
         if (symbol.IsVirtual) set.Add("virtual");
         if (symbol.IsOverride) set.Add("override");
-        if (symbol.IsSealed && symbol is not INamedTypeSymbol { TypeKind: TypeKind.Struct or TypeKind.Enum or TypeKind.Delegate }) set.Add("sealed");
+        if (symbol.IsSealed && symbol is not INamedTypeSymbol { IsStatic: true } && symbol is not INamedTypeSymbol { TypeKind: TypeKind.Struct or TypeKind.Enum or TypeKind.Delegate }) set.Add("sealed");
         if (symbol is INamedTypeSymbol { IsReadOnly: true }) set.Add("readonly");
         if (symbol is INamedTypeSymbol { IsRefLikeType: true }) set.Add("ref");
         if (symbol is IFieldSymbol { IsVolatile: true }) set.Add("volatile");
@@ -354,6 +362,7 @@ public sealed class SymbolAnalyzer
     private IReadOnlyList<AttributeDocument> Attributes(ISymbol symbol)
     {
         var result = symbol.GetAttributes().Select(a => Attribute(a, "symbol")).ToList();
+        if (symbol is IAssemblySymbol assembly) result.AddRange(assembly.Modules.SelectMany(m => m.GetAttributes()).Select(a => Attribute(a, "module")));
         if (symbol is IMethodSymbol method) result.AddRange(method.GetReturnTypeAttributes().Select(a => Attribute(a, "return")));
         return result.OrderBy(a => a.Target, StringComparer.Ordinal).ThenBy(a => a.Display, StringComparer.Ordinal).ToArray();
     }

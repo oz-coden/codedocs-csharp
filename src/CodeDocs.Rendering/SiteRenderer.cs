@@ -170,6 +170,8 @@ public static class SiteRenderer
                 b.Append(docs.Render(member.Documentation));
                 b.Append(Generics(member.GenericParameters, link, html));
                 b.Append(Attributes(member.Attributes, link, html));
+                foreach (var accessor in member.AccessorDetails.Where(a => a.Attributes.Count > 0))
+                    b.Append(Heading("Attributes on " + accessor.Kind, 4) + Attributes(accessor.Attributes, link, html, false));
                 foreach (var parameter in member.Parameters.Where(p => p.Attributes.Count > 0))
                     b.Append(Heading("Attributes on parameter " + parameter.Name, 4) + Attributes(parameter.Attributes, link, html, false));
                 if (options.ShowDeclarationFiles) b.Append(Sources(member, html));
@@ -197,7 +199,7 @@ public static class SiteRenderer
     {
         if (attributes.Count == 0) return "";
         var title = heading ? html ? "<h3>Attributes</h3>" : "### Attributes\n\n" : "";
-        return title + List(attributes.Select(a => (a.Target == "return" ? "return: " : "") + Linked(a.Display, a.Type?.TargetId is { } id ? link(id) : null, html)), html);
+        return title + List(attributes.Select(a => (a.Target is "return" or "module" ? a.Target + ": " : "") + Linked(a.Display, a.Type?.TargetId is { } id ? link(id) : null, html)), html);
     }
     private static string Sources(SymbolDocument symbol, bool html)
     {
