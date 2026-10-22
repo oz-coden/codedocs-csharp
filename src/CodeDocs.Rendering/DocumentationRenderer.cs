@@ -48,7 +48,12 @@ internal sealed class DocumentationRenderer(Func<string, string?> link, bool htm
             foreach (var element in elements)
             {
                 if (section is "param" or "typeparam") result.Append(html ? "<p><code>" + E(element.Attribute("name")?.Value ?? "") + "</code> — " : "- `" + element.Attribute("name")?.Value + "` — ");
-                if (section is "exception" or "seealso") result.Append(Reference(element, comment));
+                if (section is "exception" or "seealso")
+                {
+                    var reference = new XElement(element.Name, element.Attributes());
+                    result.Append(Reference(reference, comment));
+                    if (element.Nodes().Any()) result.Append(" — ");
+                }
                 if (section == "inheritdoc") result.Append(html ? "<p>Unresolved inheritdoc: " + E(element.ToString()) + "</p>" : "Unresolved inheritdoc: `" + element + "`\n\n");
                 else result.Append(Nodes(element.Nodes(), comment));
                 if (section is "param" or "typeparam") result.Append(html ? "</p>" : "\n");
@@ -78,12 +83,26 @@ internal sealed class DocumentationRenderer(Func<string, string?> link, bool htm
     }
     private string List(XElement element, DocumentationComment comment)
     {
+        if (element.Attribute("type")?.Value == "table") return Table(element, comment);
         var ordered = element.Attribute("type")?.Value == "number";
         var rows = element.Elements().Where(e => e.Name.LocalName is "item" or "listheader").Select(item =>
             string.Join(" — ", item.Elements().Select(e => Nodes(e.Nodes(), comment)))).ToArray();
         if (!html) return "\n" + string.Join("\n", rows.Select((r, i) => (ordered ? (i + 1) + ". " : "- ") + r)) + "\n\n";
         var tag = ordered ? "ol" : "ul";
         return "<" + tag + ">" + string.Concat(rows.Select(r => "<li>" + r + "</li>")) + "</" + tag + ">";
+    }
+    private string Table(XElement element, DocumentationComment comment)
+    {
+        var rows = element.Elements("item").Select(item => item.Elements().Select(e => Nodes(e.Nodes(), comment)).ToArray()).ToArray();
+        var headings = element.Element("listheader")?.Elements().Select(e => Nodes(e.Nodes(), comment)).ToArray() ?? [];
+        var columns = Math.Max(headings.Length, rows.Select(r => r.Length).DefaultIfEmpty(0).Max());
+        if (columns == 0) return "";
+        if (headings.Length == 0) headings = Enumerable.Range(0, columns).Select(i => i == 0 ? "Term" : i == 1 ? "Description" : "Value").ToArray();
+        if (html)
+            return "<table class=\"doc-table\"><thead><tr>" + string.Concat(Enumerable.Range(0, columns).Select(i => "<th>" + headings.ElementAtOrDefault(i) + "</th>")) +
+                "</tr></thead><tbody>" + string.Concat(rows.Select(row => "<tr>" + string.Concat(Enumerable.Range(0, columns).Select(i => "<td>" + row.ElementAtOrDefault(i) + "</td>")) + "</tr>")) + "</tbody></table>";
+        string Row(IReadOnlyList<string> values) => "| " + string.Join(" | ", Enumerable.Range(0, columns).Select(i => (values.ElementAtOrDefault(i) ?? "").Trim().Replace("\r", "").Replace("\n", "<br>"))) + " |";
+        return "\n\n" + Row(headings) + "\n" + Row(Enumerable.Repeat("---", columns).ToArray()) + "\n" + string.Join("\n", rows.Select(Row)) + "\n\n";
     }
     private string Reference(XElement element, DocumentationComment comment)
     {

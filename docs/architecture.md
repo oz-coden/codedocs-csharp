@@ -18,7 +18,7 @@ Only symbols included in the selected documentation snapshot receive links. Disp
 
 ## Information preservation
 
-The model retains raw and expanded documentation XML, resolved cref references, attributes including constructor/named arguments and return targets, parameter flags, extension targets, generic constraints and attributes, accessor attributes, delegate signatures, declaration locations, declaration headers, generated-source hints, accessor information, and implicit-declaration flags. Source declaration locations on members allow clients to group a merged partial type by declaration file.
+The model retains original and expanded documentation XML, ordered XML nodes and inheritdoc provenance, resolved cref references, attributes including constructor/named arguments and return targets, parameter flags, extension targets, generic constraints and attributes, accessor attributes, delegate signatures, declaration locations, declaration headers, generated-source hints, accessor information, and implicit-declaration flags. Source declaration locations on members allow clients to group a merged partial type by declaration file.
 
 Display filtering is applied consistently to the exported snapshot and link index. It does not change the underlying compilation. Generated declarations and compiler-synthesized API members are considered alongside source-written declarations.
 
@@ -47,3 +47,9 @@ The rename sequence is recoverable for ordinary I/O failures; it is not a filesy
 ## Extension points
 
 JSON serializes the semantic model directly and currently uses schema version implied by toolVersion. A future stable JSON schema or MCP adapter should sit above this model. Extension reverse indexes, generated-source filtering, source-repository URLs, and additional renderers can be added without coupling renderers to compiler symbols.
+
+## Structured values and XML inheritance
+
+Type references retain tuple element names, containing types, metadata/assembly names, array rank and element type, pointers, native-integer flags, type-parameter identity, and function-pointer return/parameter reference kinds and calling conventions. `Arguments` holds ordinary named-type generic arguments. Array/pointer/function-pointer/tuple components use their dedicated properties so nested components are not duplicated exponentially in JSON. Attribute arguments, field constants and optional parameter defaults retain typed values in addition to display strings. Arrays and typeof references are explicit nodes. Accessors retain parameter metadata, including attributes on the implicit setter value. Generic constraints have both display parts and structured kind/type entries.
+
+XML reading is isolated from symbol extraction. Inheritdoc expands documented overrides/interfaces recursively, follows undocumented intermediate overrides, applies node-selecting XPath, then remaps parameter/type-parameter names by ordinal. Existing local sections take precedence. Invalid expressions, scalar/empty selections, unresolved sources and cycles produce warnings and remain visible as unresolved inheritdoc. XML parsing prohibits DTDs and external entity resolution. Raw XML is retained independently of rendering.

@@ -123,7 +123,7 @@ nullable、dynamic、名前付き tuple、ポインタ、ref / in / out、params
 
 内部リンクは解析対象に含まれるシンボルだけに生成します。BCL や NuGet の型は表示しますが、外部 URL を推測しません。継承メンバは元のメンバへの参照として表示します。
 
-XML Documentation は summary / remarks / param / typeparam / returns / exception / example / value / see / seealso / inheritdoc と、code / c / para / list を扱います。明示的な cref、override、インターフェイス実装から `inheritdoc` を可能な範囲で解決します。コメントがなければ説明文を生成しません。
+XML Documentation は summary / remarks / param / typeparam / returns / exception / example / value / see / seealso / inheritdoc と、code / c / para / list を扱います。明示的な cref、override、インターフェイス実装から `inheritdoc` を解決し、XPath `path` による部分選択にも対応します。継承した param / typeparam とそのインライン参照は、引数の位置に従って継承先の名前へ対応付けます。ローカルの説明を優先し、不正な XPath・空の選択・循環は警告として元の記述を保持します。表形式の XML list は HTML / Markdown の表へ出力します。コメントがなければ説明文を生成しません。
 
 ## 不完全な解析と出力保護
 
@@ -152,5 +152,7 @@ dotnet run --project tests/CodeDocs.Tests -c Release --no-build
 ```
 
 テストランナーは解析、可視性、識別子、XML、出力の決定性、内部リンク、安全な置換、設定、MSBuild 読込、不完全な解析のポリシーを検証します。プロセス間通信を利用できない環境では `--unit-only` をテストランナーに指定し、MSBuild 統合テストだけを明示的に除外できます。CI は Linux・Windows の両方で全テストを実行します。
+
+JSON には表示文字列に加え、属性引数の型付き定数・配列・typeof、tuple 要素名、配列の次元、ポインタと関数ポインタの構造、型引数の識別情報、ジェネリック制約、XML ノードと継承元情報を保持します。delegate の引数・戻り値、accessor の引数、アセンブリ・モジュールの属性も対象です。
 
 設計と現在の制約は [architecture](docs/architecture.md) と [limitations](docs/limitations.md) を参照してください。

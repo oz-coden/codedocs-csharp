@@ -12,6 +12,7 @@ public static class SiteRenderer
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
         Converters = { new JsonStringEnumConverter() }
     };
 
@@ -137,6 +138,8 @@ public static class SiteRenderer
             b.Append(Heading("Implemented Interfaces") + List(type.Interfaces.Select(i => Linked(i.Display, i.TargetId is null ? null : link(i.TargetId), html)), html));
         b.Append(Generics(type.GenericParameters, link, html));
         b.Append(Attributes(type.Attributes, link, html));
+        if (type.DelegateSignature is { } signature)
+            b.Append(MemberMetadata(signature, link, html));
         if (options.ShowDeclarationFiles) b.Append(Sources(type, html));
         var categories = Categories.Where(c => type.Members.Any(m => m.Category == c)).ToArray();
         if (categories.Length > 0) b.Append(Heading("Member Summary"));
@@ -169,11 +172,7 @@ public static class SiteRenderer
                 if (member.IsPrimaryConstructor) b.Append(Paragraph("Primary constructor."));
                 b.Append(docs.Render(member.Documentation));
                 b.Append(Generics(member.GenericParameters, link, html));
-                b.Append(Attributes(member.Attributes, link, html));
-                foreach (var accessor in member.AccessorDetails.Where(a => a.Attributes.Count > 0))
-                    b.Append(Heading("Attributes on " + accessor.Kind, 4) + Attributes(accessor.Attributes, link, html, false));
-                foreach (var parameter in member.Parameters.Where(p => p.Attributes.Count > 0))
-                    b.Append(Heading("Attributes on parameter " + parameter.Name, 4) + Attributes(parameter.Attributes, link, html, false));
+                b.Append(MemberMetadata(member, link, html));
                 if (options.ShowDeclarationFiles) b.Append(Sources(member, html));
                 if (html) b.Append("</article>");
             }
@@ -188,10 +187,25 @@ public static class SiteRenderer
         foreach (var parameter in parameters)
         {
             var name = (parameter.Variance == "None" ? "" : parameter.Variance.ToLowerInvariant() + " ") + parameter.Name;
-            b.Append(html ? "<h4><code>" + E(name) + "</code></h4><p>" : "**" + Md(name) + "**\n\n");
-            b.Append(string.Concat(parameter.Constraints.Select(p => Linked(p.Text, p.TargetId is null ? null : link(p.TargetId), html))));
-            b.Append(html ? "</p>" : "\n\n");
+            b.Append(html ? "<h4><code>" + E(name) + "</code></h4>" : "**" + Md(name) + "**\n\n");
+            b.Append(List(parameter.ConstraintDetails.Count > 0
+                ? parameter.ConstraintDetails.Select(c => string.Concat(c.Declaration.Select(p => Linked(p.Text, p.TargetId is null ? null : link(p.TargetId), html))))
+                : parameter.ConstraintItems.Select(c => html ? E(c) : Md(c)), html));
             b.Append(Attributes(parameter.Attributes, link, html));
+        }
+        return b.ToString();
+    }
+    private static string MemberMetadata(MemberDocument member, Func<string, string?> link, bool html)
+    {
+        string Heading(string name) => html ? "<h4>" + E(name) + "</h4>" : "**" + Md(name) + "**\n\n";
+        var b = new StringBuilder(Attributes(member.Attributes, link, html));
+        foreach (var parameter in member.Parameters.Where(p => p.Attributes.Count > 0))
+            b.Append(Heading("Attributes on parameter " + parameter.Name) + Attributes(parameter.Attributes, link, html, false));
+        foreach (var accessor in member.AccessorDetails)
+        {
+            if (accessor.Attributes.Count > 0) b.Append(Heading("Attributes on " + accessor.Kind) + Attributes(accessor.Attributes, link, html, false));
+            foreach (var parameter in accessor.Parameters.Where(p => p.Attributes.Count > 0))
+                b.Append(Heading("Attributes on " + accessor.Kind + " parameter " + parameter.Name) + Attributes(parameter.Attributes, link, html, false));
         }
         return b.ToString();
     }
@@ -216,6 +230,8 @@ public static class SiteRenderer
         b.Append("## Namespaces\n\n");
         b.Append(List(doc.Namespaces.Select(ns => options.SingleFile ? Md(NamespaceName(ns.Name)) : Linked(NamespaceName(ns.Name), NamespaceFile(ns.Name, false), false)), false));
         b.Append("## Types\n\n" + TypeTable(doc.Types, id => Link(links, id), false));
+        foreach (var project in doc.Projects.Where(p => p.Attributes.Count > 0))
+            b.Append("## Project metadata: " + Md(project.Name) + "\n\n" + Attributes(project.Attributes, id => Link(links, id), false));
         if (options.SingleFile)
         {
             foreach (var type in doc.Types)

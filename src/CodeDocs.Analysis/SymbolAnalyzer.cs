@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Globalization;
-using System.Xml.Linq;
 using CodeDocs.Model;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -85,7 +84,7 @@ public sealed class SymbolAnalyzer
     private static string? TargetFramework(Compilation compilation) => compilation.Assembly.GetAttributes()
         .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "System.Runtime.Versioning.TargetFrameworkAttribute")?.ConstructorArguments.FirstOrDefault().Value as string;
     private static string ProjectId(CompilationUnit unit) => unit.File + "|" + unit.Name;
-    private static string Key(ISymbol symbol) => symbol.ContainingAssembly?.Identity.Name + "|" + symbol.OriginalDefinition.GetDocumentationCommentId();
+    private static string Key(ISymbol symbol) => symbol.ContainingAssembly?.Identity.ToString() + "|" + symbol.OriginalDefinition.GetDocumentationCommentId();
     private string Id(ISymbol symbol) => projectId + "::" + (symbol.GetDocumentationCommentId() ?? symbol.Kind + ":" + symbol.ToDisplayString());
     private void Register(ISymbol symbol)
     {
@@ -158,12 +157,28 @@ public sealed class SymbolAnalyzer
     private TypeReference TypeRef(ITypeSymbol symbol) => new(symbol.ToDisplayString(TypeDisplay), Resolve(symbol), symbol.TypeKind.ToString(),
         symbol switch
         {
-            INamedTypeSymbol n => n.TypeArguments.Select(TypeRef).ToArray(),
-            IArrayTypeSymbol a => [TypeRef(a.ElementType)],
-            IPointerTypeSymbol p => [TypeRef(p.PointedAtType)],
-            IFunctionPointerTypeSymbol f => [TypeRef(f.Signature.ReturnType), .. f.Signature.Parameters.Select(p => TypeRef(p.Type))],
+            INamedTypeSymbol { IsTupleType: false } n => n.TypeArguments.Select(TypeRef).ToArray(),
             _ => []
-        }, symbol.NullableAnnotation.ToString());
+        }, symbol.NullableAnnotation.ToString())
+    {
+        Name = symbol.Name, MetadataName = symbol.MetadataName,
+        Namespace = symbol.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : "",
+        AssemblyIdentity = symbol.ContainingAssembly?.Identity.ToString(),
+        IsValueType = symbol.IsValueType, IsReferenceType = symbol.IsReferenceType,
+        IsNativeInteger = symbol.IsNativeIntegerType,
+        IsUnboundGenericType = symbol is INamedTypeSymbol { IsUnboundGenericType: true },
+        ContainingType = symbol is INamedTypeSymbol { ContainingType: { } container } ? TypeRef(container) : null,
+        TupleElements = symbol is INamedTypeSymbol { IsTupleType: true } tuple
+            ? tuple.TupleElements.Select(e => new TupleElementDocument(e.Name, e.IsExplicitlyNamedTupleElement, TypeRef(e.Type))).ToArray() : [],
+        ArrayRank = (symbol as IArrayTypeSymbol)?.Rank, IsSZArray = (symbol as IArrayTypeSymbol)?.IsSZArray,
+        ElementType = symbol is IArrayTypeSymbol array ? TypeRef(array.ElementType) : null,
+        PointedAtType = symbol is IPointerTypeSymbol pointer ? TypeRef(pointer.PointedAtType) : null,
+        FunctionPointer = symbol is IFunctionPointerTypeSymbol function ? new(TypeRef(function.Signature.ReturnType), function.Signature.RefKind.ToString(),
+            function.Signature.CallingConvention.ToString(), function.Signature.UnmanagedCallingConventionTypes.Select(TypeRef).ToArray(),
+            function.Signature.Parameters.Select(p => new FunctionPointerParameterDocument(TypeRef(p.Type), p.RefKind.ToString(), p.ScopedKind.ToString())).ToArray()) : null,
+        TypeParameter = symbol is ITypeParameterSymbol parameter ? new(parameter.Ordinal, parameter.TypeParameterKind.ToString(),
+            (parameter.DeclaringMethod as ISymbol ?? parameter.DeclaringType)?.GetDocumentationCommentId()) : null
+    };
 
     private static string Kind(INamedTypeSymbol type) => type.IsRecord
         ? type.TypeKind == TypeKind.Struct ? "Record structs" : "Records"
@@ -193,6 +208,7 @@ public sealed class SymbolAnalyzer
         }
         relationships.AddRange(type.TypeParameters.SelectMany(p => p.ConstraintTypes).Select(t => new Relationship("GenericConstraint", TypeRef(t))));
         relationships.AddRange(type.GetAttributes().Where(a => a.AttributeClass is not null).Select(a => new Relationship("Attribute", TypeRef(a.AttributeClass!))));
+        relationships.AddRange(AttributeRelationships(Attributes(type), null));
         return new()
         {
             Id = Id(type), DocumentationId = type.GetDocumentationCommentId() ?? "", Name = type.ToDisplayString(TypeDisplay),
@@ -265,6 +281,10 @@ public sealed class SymbolAnalyzer
         if (valueType is not null) relationships.Add(new(symbol is IMethodSymbol ? "ReturnType" : symbol.Kind + "Type", TypeRef(valueType), Id(symbol)));
         relationships.AddRange((method?.TypeParameters ?? []).SelectMany(p => p.ConstraintTypes).Select(t => new Relationship("GenericConstraint", TypeRef(t), Id(symbol))));
         relationships.AddRange(symbol.GetAttributes().Where(a => a.AttributeClass is not null).Select(a => new Relationship("Attribute", TypeRef(a.AttributeClass!), Id(symbol))));
+        relationships.AddRange(AttributeRelationships(Attributes(symbol)
+            .Concat(parameters.SelectMany(p => Attributes(p)))
+            .Concat((method?.TypeParameters ?? []).SelectMany(p => Attributes(p)))
+            .Concat(AccessorSymbols(symbol).SelectMany(a => Attributes(a).Concat(a.Parameters.SelectMany(p => Attributes(p))))), Id(symbol)));
         var declaration = Parts(symbol).ToList();
         var modifiers = Modifiers(symbol);
         string[] prefixModifiers = ["public", "protected", "internal", "private", "file", "new", "static", "abstract", "virtual", "sealed", "override", "readonly", "extern", "required", "volatile", "const"];
@@ -292,8 +312,9 @@ public sealed class SymbolAnalyzer
             ValueType = valueType is null ? null : TypeRef(valueType), Parameters = parameters.Select(Parameter).ToArray(),
             ExplicitImplementations = ExplicitSymbols(symbol).Select(s => Resolve(s) ?? s.GetDocumentationCommentId() ?? s.ToDisplayString()).ToArray(),
             Accessors = property is null ? [] : Accessors(property),
-            AccessorDetails = AccessorSymbols(symbol).Select(a => new AccessorDocument(a.MethodKind.ToString(), AccessibilityText(a), Attributes(a), Modifiers(a))).ToArray(),
+            AccessorDetails = AccessorSymbols(symbol).Select(a => new AccessorDocument(a.MethodKind.ToString(), AccessibilityText(a), Attributes(a), Modifiers(a)) { Parameters = a.Parameters.Select(Parameter).ToArray() }).ToArray(),
             ConstantValue = symbol is IFieldSymbol { HasConstantValue: true } field ? Constant(field.ConstantValue) : null,
+            Constant = symbol is IFieldSymbol { HasConstantValue: true } constantField ? Value(constantField.Type, constantField.ConstantValue) : null,
             ReturnRefKind = method?.RefKind.ToString() ?? property?.RefKind.ToString(),
             IsExtensionMethod = method?.IsExtensionMethod ?? false,
             ExtensionTarget = method is { IsExtensionMethod: true, Parameters.Length: > 0 } ? TypeRef(method.Parameters[0].Type) : null,
@@ -311,7 +332,8 @@ public sealed class SymbolAnalyzer
         (m!.DeclaredAccessibility != property.DeclaredAccessibility ? AccessibilityText(m) + " " : "") +
         (m.MethodKind == MethodKind.PropertyGet ? "get;" : m.IsInitOnly ? "init;" : "set;")).ToArray();
     private ParameterDocument Parameter(IParameterSymbol p) => new(p.Name, TypeRef(p.Type), p.RefKind.ToString(), p.ScopedKind.ToString(),
-        p.IsParams, p.IsOptional, p.HasExplicitDefaultValue ? Constant(p.ExplicitDefaultValue) : null, Attributes(p));
+        p.IsParams, p.IsOptional, p.HasExplicitDefaultValue ? Constant(p.ExplicitDefaultValue) : null, Attributes(p))
+    { Default = p.HasExplicitDefaultValue ? Value(p.Type, p.ExplicitDefaultValue) : null };
     private static bool IsPrimary(IMethodSymbol method) => method.MethodKind == MethodKind.Constructor && method.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is TypeDeclarationSyntax { ParameterList: not null });
     private static string Escape(string name) => SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
     private static string Constant(object? value) => value switch
@@ -350,18 +372,19 @@ public sealed class SymbolAnalyzer
 
     private IReadOnlyList<GenericParameterDocument> Generics(ImmutableArray<ITypeParameterSymbol> parameters) => parameters.Select(p =>
     {
-        var items = new List<IReadOnlyList<TextPart>>();
-        if (p.HasUnmanagedTypeConstraint) items.Add([new("unmanaged")]);
-        else if (p.HasValueTypeConstraint) items.Add([new("struct")]);
-        else if (p.HasReferenceTypeConstraint) items.Add([new(p.ReferenceTypeConstraintNullableAnnotation == NullableAnnotation.Annotated ? "class?" : "class")]);
-        if (p.HasNotNullConstraint) items.Add([new("notnull")]);
-        items.AddRange(p.ConstraintTypes.Select(t => Parts(t, true)));
-        if (p.HasConstructorConstraint) items.Add([new("new()")]);
-        if (p.AllowsRefLikeType) items.Add([new("allows ref struct")]);
+        var details = new List<GenericConstraintDocument>();
+        void Keyword(string kind, string text) => details.Add(new(kind, text, null, [new(text)]));
+        if (p.HasUnmanagedTypeConstraint) Keyword("Unmanaged", "unmanaged");
+        else if (p.HasValueTypeConstraint) Keyword("ValueType", "struct");
+        else if (p.HasReferenceTypeConstraint) Keyword("ReferenceType", p.ReferenceTypeConstraintNullableAnnotation == NullableAnnotation.Annotated ? "class?" : "class");
+        if (p.HasNotNullConstraint) Keyword("NotNull", "notnull");
+        details.AddRange(p.ConstraintTypes.Select(t => new GenericConstraintDocument("Type", t.ToDisplayString(TypeDisplay), TypeRef(t), Parts(t, true))));
+        if (p.HasConstructorConstraint) Keyword("Constructor", "new()");
+        if (p.AllowsRefLikeType) Keyword("AllowsRefLikeType", "allows ref struct");
         var parts = new List<TextPart>();
-        foreach (var item in items) { if (parts.Count > 0) parts.Add(new(", ")); parts.AddRange(item); }
-        return new GenericParameterDocument(p.Name, p.Variance.ToString(), parts,
-            items.Select(i => string.Concat(i.Select(s => s.Text))).ToArray(), Attributes(p));
+        foreach (var item in details) { if (parts.Count > 0) parts.Add(new(", ")); parts.AddRange(item.Declaration); }
+        return new GenericParameterDocument(p.Name, p.Variance.ToString(), parts, details.Select(i => i.Display).ToArray(), Attributes(p))
+        { ConstraintDetails = details };
     }).ToArray();
 
     private IReadOnlyList<AttributeDocument> Attributes(ISymbol symbol)
@@ -373,10 +396,40 @@ public sealed class SymbolAnalyzer
     }
     private AttributeDocument Attribute(AttributeData a, string target) => new(a.ToString() ?? "<unknown>", a.AttributeClass is null ? null : TypeRef(a.AttributeClass), target,
         a.ConstructorArguments.Select(TypedConstantText).ToArray(),
-        new SortedDictionary<string, string>(a.NamedArguments.ToDictionary(p => p.Key, p => TypedConstantText(p.Value)), StringComparer.Ordinal));
+        new SortedDictionary<string, string>(a.NamedArguments.ToDictionary(p => p.Key, p => TypedConstantText(p.Value)), StringComparer.Ordinal))
+    {
+        ConstructorId = Resolve(a.AttributeConstructor),
+        ConstructorValues = a.ConstructorArguments.Select(TypedValue).ToArray(),
+        NamedValues = new SortedDictionary<string, ConstantDocument>(a.NamedArguments.ToDictionary(p => p.Key, p => TypedValue(p.Value)), StringComparer.Ordinal)
+    };
+    private ConstantDocument Value(ITypeSymbol? type, object? value) => new(type?.TypeKind == TypeKind.Enum ? "Enum" : "Primitive", type is null ? null : TypeRef(type), Constant(value))
+    { IsNull = value is null, Value = value };
+    private ConstantDocument TypedValue(TypedConstant constant) => new(constant.Kind.ToString(), constant.Type is null ? null : TypeRef(constant.Type), TypedConstantText(constant))
+    {
+        IsNull = constant.IsNull,
+        Value = constant.Kind is TypedConstantKind.Array or TypedConstantKind.Type ? null : constant.Value,
+        ReferencedType = constant.Kind == TypedConstantKind.Type && constant.Value is ITypeSymbol referenced ? TypeRef(referenced) : null,
+        Elements = constant.Kind == TypedConstantKind.Array && !constant.IsNull ? constant.Values.Select(TypedValue).ToArray() : []
+    };
     private static string TypedConstantText(TypedConstant constant) => constant.Kind == TypedConstantKind.Array
         ? constant.IsNull ? "null" : "[" + string.Join(", ", constant.Values.Select(TypedConstantText)) + "]"
         : constant.Kind == TypedConstantKind.Type ? "typeof(" + constant.Value + ")" : Constant(constant.Value);
+
+    private static IEnumerable<Relationship> AttributeRelationships(IEnumerable<AttributeDocument> attributes, string? memberId)
+    {
+        foreach (var attribute in attributes)
+        {
+            if (attribute.Type is not null) yield return new("Attribute", attribute.Type, memberId);
+            foreach (var value in attribute.ConstructorValues.Concat(attribute.NamedValues.Values).SelectMany(ConstantTypes))
+                yield return new("AttributeArgument", value, memberId);
+        }
+    }
+    private static IEnumerable<TypeReference> ConstantTypes(ConstantDocument constant)
+    {
+        if (constant.Type is not null) yield return constant.Type;
+        if (constant.ReferencedType is not null) yield return constant.ReferencedType;
+        foreach (var type in constant.Elements.SelectMany(ConstantTypes)) yield return type;
+    }
 
     private IReadOnlyList<SourceDeclaration> Sources(ISymbol symbol)
     {
@@ -400,91 +453,7 @@ public sealed class SymbolAnalyzer
         }).OrderBy(s => s.File, StringComparer.Ordinal).ThenBy(s => s.Line).ToArray();
     }
 
-    private DocumentationComment Documentation(ISymbol symbol)
-    {
-        var raw = symbol.GetDocumentationCommentXml(CultureInfo.InvariantCulture, expandIncludes: true) ?? "";
-        if (raw.Length == 0) return new("", "", new SortedDictionary<string, string>());
-        try
-        {
-            var xml = ParseXml(raw);
-            string? inheritedFrom = null;
-            ResolveInheritdoc(symbol, xml, new HashSet<ISymbol>(SymbolEqualityComparer.Default), ref inheritedFrom);
-            var references = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            foreach (var cref in xml.DescendantsAndSelf().Attributes("cref").Select(a => a.Value).Distinct())
-            {
-                var target = DocumentationCommentId.GetFirstSymbolForReferenceId(cref, current.Compilation)
-                    ?? DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, current.Compilation);
-                if (Resolve(target) is { } id) references[cref] = id;
-            }
-            return new(raw, xml.ToString(SaveOptions.DisableFormatting), references, inheritedFrom);
-        }
-        catch (System.Xml.XmlException e)
-        {
-            diagnostics.Add(new("Warning", "XMLDOC", $"{symbol.ToDisplayString()}: {e.Message}"));
-            return new(raw, "", new SortedDictionary<string, string>());
-        }
-    }
-    private static XElement ParseXml(string xml)
-    {
-        using var reader = System.Xml.XmlReader.Create(new StringReader(xml), new System.Xml.XmlReaderSettings
-        { DtdProcessing = System.Xml.DtdProcessing.Prohibit, XmlResolver = null });
-        return XElement.Load(reader, LoadOptions.PreserveWhitespace);
-    }
-    private void ResolveInheritdoc(ISymbol symbol, XElement xml, HashSet<ISymbol> visited, ref string? inheritedFrom)
-    {
-        if (!visited.Add(symbol)) return;
-        foreach (var inherit in xml.Descendants("inheritdoc").ToArray())
-        {
-            if (inherit.Attribute("path") is not null)
-            {
-                diagnostics.Add(new("Warning", "INHERITDOC_PATH", $"XPath inheritdoc is preserved but not expanded for {symbol.ToDisplayString()}."));
-                continue;
-            }
-            var cref = inherit.Attribute("cref")?.Value;
-            var target = cref is null ? InheritanceTarget(symbol) : DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, current.Compilation)
-                ?? DocumentationCommentId.GetFirstSymbolForReferenceId(cref, current.Compilation);
-            if (target is null || visited.Contains(target)) continue;
-            var raw = target.GetDocumentationCommentXml(CultureInfo.InvariantCulture, expandIncludes: true);
-            if (string.IsNullOrWhiteSpace(raw)) continue;
-            var inherited = ParseXml(raw);
-            ResolveInheritdoc(target, inherited, visited, ref inheritedFrom);
-            inheritedFrom = Resolve(target) ?? target.GetDocumentationCommentId();
-            if (inherit.Parent == xml)
-            {
-                foreach (var element in inherited.Elements())
-                {
-                    if (element.Name.LocalName == "inheritdoc") continue;
-                    var key = element.Attribute("name")?.Value ?? element.Attribute("cref")?.Value;
-                    if (!xml.Elements(element.Name).Any(e => (e.Attribute("name")?.Value ?? e.Attribute("cref")?.Value) == key))
-                        inherit.AddBeforeSelf(new XElement(element));
-                }
-                inherit.Remove();
-            }
-            else
-            {
-                var matching = inherited.Elements(inherit.Parent!.Name).FirstOrDefault();
-                if (matching is not null) inherit.ReplaceWith(matching.Nodes().Select(CloneNode));
-            }
-        }
-        visited.Remove(symbol);
-    }
-    private static XNode CloneNode(XNode node) => node is XElement element ? new XElement(element) : new XText(node.ToString());
-    private ISymbol? InheritanceTarget(ISymbol symbol)
-    {
-        var overridden = symbol switch
-        {
-            IMethodSymbol m => (ISymbol?)m.OverriddenMethod,
-            IPropertySymbol p => p.OverriddenProperty,
-            IEventSymbol e => e.OverriddenEvent,
-            INamedTypeSymbol t => t.BaseType,
-            _ => null
-        };
-        if (overridden is not null) return overridden;
-        var explicitTarget = ExplicitSymbols(symbol).FirstOrDefault();
-        if (explicitTarget is not null) return explicitTarget;
-        return symbol.ContainingType?.AllInterfaces.SelectMany(i => i.GetMembers()).FirstOrDefault(member =>
-            SymbolEqualityComparer.Default.Equals(symbol.ContainingType.FindImplementationForInterfaceMember(member), symbol));
-    }
+    private DocumentationComment Documentation(ISymbol symbol) => new XmlDocumentationReader(current.Compilation, Resolve, diagnostics).Read(symbol);
 
     private IReadOnlyList<InheritedMemberDocument> Inherited(INamedTypeSymbol type)
     {

@@ -33,7 +33,9 @@ internal sealed class Suite
             ("C# semantic declarations", () => Sync(Semantics)), ("Effective visibility", () => Sync(VisibilityRules)),
             ("Stable identity and internal references", () => Sync(Identities)), ("XML documentation and escaping", Documentation),
             ("Deterministic renderers and link integrity", Renderers), ("Snapshot transactions and path guards", Transactions),
-            ("CLI configuration and discovery", () => Sync(ConfigurationRules))
+            ("CLI configuration and discovery", () => Sync(ConfigurationRules)),
+            ("Structured semantic information", () => Sync(() => RefinementTests.Semantics(source => Analyze(source, Visibility.All), Check))),
+            ("XML selection, remapping and metadata rendering", () => RefinementTests.Documentation(source => Analyze(source, Visibility.All), Check, scratch))
         };
         if (!unitOnly) tests.Add(("MSBuild integration and incomplete policies", Integration));
         var failed = 0;
