@@ -100,7 +100,7 @@ public sealed class SymbolAnalyzer
         if (!ids.TryGetValue(Key(symbol), out var values)) return null;
         return values.FirstOrDefault(v => v.Project == projectId).Id ?? values.OrderBy(v => v.Project, StringComparer.Ordinal).First().Id;
     }
-    private string Relative(string path) => string.IsNullOrEmpty(path) ? "<generated>" : Path.GetRelativePath(root, path).Replace('\\', '/');
+    private string Relative(string path) => string.IsNullOrEmpty(path) ? "<generated>" : (Path.IsPathRooted(path) ? Path.GetRelativePath(root, path) : path).Replace('\\', '/');
     private static IEnumerable<INamedTypeSymbol> Types(INamespaceSymbol ns)
     {
         foreach (var child in ns.GetNamespaceMembers().OrderBy(n => n.Name, StringComparer.Ordinal))
@@ -320,7 +320,9 @@ public sealed class SymbolAnalyzer
     private IReadOnlyList<string> Modifiers(ISymbol symbol)
     {
         var set = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var syntax in symbol.DeclaringSyntaxReferences.Select(r => r.GetSyntax()))
+        var references = symbol.DeclaringSyntaxReferences.AsEnumerable();
+        if (symbol is IMethodSymbol { PartialImplementationPart: { } implementation }) references = references.Concat(implementation.DeclaringSyntaxReferences);
+        foreach (var syntax in references.Select(r => r.GetSyntax()))
         {
             var tokens = syntax switch
             {
