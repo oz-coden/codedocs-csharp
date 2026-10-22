@@ -1,0 +1,22 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet build CodeDocs.CSharp.sln -c Release
+      - run: dotnet run --project tests/CodeDocs.Tests -c Release --no-build
+      - run: dotnet restore samples/Example/Example.csproj
+      - run: dotnet run --project src/CodeDocs.Cli -c Release --no-build -- build samples/Example/Example.csproj --format html --format markdown --format json --single-file -o artifacts/example
+      - run: dotnet pack src/CodeDocs.Cli -c Release --no-build -o artifacts/packages

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>codedocs</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>codedocs</ToolCommandName>
+    <PackageId>CodeDocs.CSharp</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Deterministic C# API documentation from Roslyn and MSBuild.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CodeDocs.Analysis/CodeDocs.Analysis.csproj" />
+    <ProjectReference Include="../CodeDocs.Rendering/CodeDocs.Rendering.csproj" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
