@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><GenerateDocumentationFile>true</GenerateDocumentationFile><AllowUnsafeBlocks>true</AllowUnsafeBlocks><NoWarn>$(NoWarn);1591</NoWarn></PropertyGroup>
+</Project>

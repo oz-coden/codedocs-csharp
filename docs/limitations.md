@@ -1,0 +1,13 @@
+# Current limits
+
+- The executable targets .NET 9. The analyzed project may target other frameworks when its SDK, workloads, and reference assemblies are installed. Roslyn is pinned to 4.14, with C# 13 support; newer language features require an explicit dependency upgrade.
+- MSBuildWorkspace evaluates the installed SDK's selected configuration. Multi-target projects are represented as the workspace loads them; the CLI does not promise to enumerate and merge every framework/configuration combination. SDK-style C# projects are the primary tested input.
+- Dependencies must be restored before analysis. The tool does not install SDKs, workloads, or missing packages.
+- Generated files and source-generator output present in the compilation are included. Analyzers/source generators execute as part of workspace compilation. The tool is not a sandbox for untrusted projects.
+- Inheritdoc handles cref, overridden members, base types, and interface implementations. XPath `path` expressions are preserved with a warning rather than evaluated. Parameter-name remapping across overridden methods is not performed. Documentation inheritance is not a full replacement for every vendor's XML documentation processor.
+- XML list tables are rendered as lists; the raw XML remains in JSON. Unrecognized XML tags preserve their textual contents but not arbitrary custom formatting. HTML markup supplied through documentation is escaped.
+- Inherited members are grouped by declaring type and category. Details link to internal documented members when available. External base-member names remain plain text. Constructor inheritance is excluded.
+- Displayed signatures are reconstructed from compiler symbols plus source modifier information. They retain API meaning, not original whitespace or aliases. Declaration headers and raw XML remain available in the semantic model. Assembly/module attributes are represented separately from type/member declarations where collected.
+- Explicit interface implementations are included for visible interfaces even when their declared accessibility is private. This exposes the implementation through its interface contract.
+- Output paths must use a dedicated directory. The output transaction prevents ordinary partial updates but cannot guarantee uninterrupted reads or recovery from every power loss. The generator does not automatically publish or serve the output.
+- JSON is available as an initial renderer; its schema is not yet declared stable. There is no MCP server, external renderer plugin protocol, extension-method reverse index, or source-repository link configuration.
