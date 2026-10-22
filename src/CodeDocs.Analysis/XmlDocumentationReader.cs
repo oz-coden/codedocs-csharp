@@ -69,7 +69,8 @@ internal sealed class XmlDocumentationReader(Compilation compilation, Func<ISymb
                 (ISymbol Symbol, XElement Xml)? source = null;
                 foreach (var candidate in candidates)
                 {
-                    source = Documented(candidate, visited, inheritances);
+                    try { source = Documented(candidate, visited, inheritances); }
+                    catch (XmlException e) { Warn("XMLDOC", candidate, e.Message); }
                     if (source is not null) break;
                 }
                 if (source is null)

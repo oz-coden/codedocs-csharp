@@ -65,6 +65,8 @@ internal static class RefinementTests
         var own = XElement.Parse(cases.Members.Single(m => m.Name == "Own").Documentation.Xml);
         check(own.Element("summary")?.Value == "Local summary." && own.Element("param")?.Attribute("name")?.Value == "current", "Local documentation precedence failed.");
         var child = doc.Types.Single(t => t.Name == "Child");
+        check(!child.InheritedMembers.Any(m => m.Name.Contains("Echo", StringComparison.Ordinal)), "Renamed generic override was duplicated as an inherited member.");
+        check(cases.Members.Single(m => m.Name == "Scalar").Documentation.Inheritances.Any(i => i.Status == "InvalidPath"), "Scalar XPath result was treated as XML content.");
         check(child.Members.Single(m => m.Name == "Execute").Documentation.Xml.Contains("Base operation", StringComparison.Ordinal), "Undocumented override interrupted inheritance lookup.");
         check(doc.Diagnostics.Any(d => d.Code == "INHERITDOC_PATH") && doc.Diagnostics.Any(d => d.Code == "INHERITDOC_EMPTY") && doc.Diagnostics.Any(d => d.Code == "INHERITDOC_CYCLE"), "Invalid/empty/cyclic inheritdoc did not produce warnings.");
         check(cases.Members.Single(m => m.Name == "BadPath").Documentation.Xml.Contains("inheritdoc", StringComparison.Ordinal), "Invalid inheritdoc was discarded.");
@@ -135,12 +137,16 @@ internal static class RefinementTests
         {
             /// <summary>Base operation.</summary><param name="old">Input for <paramref name="old"/>.</param><returns>Result.</returns>
             public virtual int Execute(int old) => old;
+            /// <summary>Echoes a value.</summary>
+            public virtual T Echo<T>(T old) => old;
         }
         public class Middle : Base { public override int Execute(int middle) => middle; }
         public class Child : Middle
         {
             /// <inheritdoc/>
             public override int Execute(int current) => current;
+            /// <inheritdoc/>
+            public override TResult Echo<TResult>(TResult current) => current;
         }
         public class Cases
         {
@@ -154,6 +160,8 @@ internal static class RefinementTests
             public void BadPath() { }
             /// <inheritdoc cref="Base.Execute" path="/param[@name='missing']"/>
             public void Empty() { }
+            /// <inheritdoc cref="Base.Execute" path="count(param)"/>
+            public void Scalar() { }
             /// <inheritdoc cref="CycleB"/>
             public void CycleA() { }
             /// <inheritdoc cref="CycleA"/>

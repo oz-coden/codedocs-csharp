@@ -459,6 +459,14 @@ public sealed class SymbolAnalyzer
     {
         var result = new List<InheritedMemberDocument>();
         var signatures = new HashSet<string>(StringComparer.Ordinal);
+        var overridden = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+        static ISymbol? ParentMember(ISymbol member) => member switch
+        {
+            IMethodSymbol m => m.OverriddenMethod, IPropertySymbol p => p.OverriddenProperty,
+            IEventSymbol e => e.OverriddenEvent, _ => null
+        };
+        foreach (var member in ApiMembers(type))
+            for (var parent = ParentMember(member); parent is not null; parent = ParentMember(parent)) overridden.Add(parent.OriginalDefinition);
         string Signature(ISymbol s) => s switch
         {
             IMethodSymbol m => m.MetadataName + "`" + m.Arity + "(" + string.Join(",", m.Parameters.Select(p => p.RefKind + ":" + p.Type.ToDisplayString(TypeDisplay))) + ")",
@@ -475,7 +483,7 @@ public sealed class SymbolAnalyzer
             {
                 if (member is IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor or MethodKind.Destructor }) continue;
                 if (!current.Compilation.IsSymbolAccessibleWithin(member, type) || member.DeclaredAccessibility == Accessibility.Private || !VisibleAccessibility(member.DeclaredAccessibility)) continue;
-                if (!signatures.Add(Signature(member))) continue;
+                if (overridden.Contains(member.OriginalDefinition) || !signatures.Add(Signature(member))) continue;
                 result.Add(new(parent.ToDisplayString(TypeDisplay), Resolve(parent), member.ToDisplayString(Display), Resolve(member), Category(member)));
             }
         }
