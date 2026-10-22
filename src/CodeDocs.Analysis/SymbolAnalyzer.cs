@@ -267,8 +267,11 @@ public sealed class SymbolAnalyzer
         relationships.AddRange(symbol.GetAttributes().Where(a => a.AttributeClass is not null).Select(a => new Relationship("Attribute", TypeRef(a.AttributeClass!), Id(symbol))));
         var declaration = Parts(symbol).ToList();
         var modifiers = Modifiers(symbol);
+        string[] prefixModifiers = ["public", "protected", "internal", "private", "file", "new", "static", "abstract", "virtual", "sealed", "override", "readonly", "extern", "required", "volatile", "const"];
+        var insertion = 0;
+        while (insertion < declaration.Count && (string.IsNullOrWhiteSpace(declaration[insertion].Text) || prefixModifiers.Contains(declaration[insertion].Text))) insertion++;
         foreach (var modifier in modifiers.Where(m => m is "async" or "unsafe" or "partial" or "scoped"))
-            if (!declaration.Any(p => p.Text == modifier)) declaration.Insert(0, new(modifier + " "));
+            if (!declaration.Any(p => p.Text == modifier)) declaration.Insert(insertion++, new(modifier + " "));
         if (property is not null)
         {
             var text = string.Concat(declaration.Select(p => p.Text));

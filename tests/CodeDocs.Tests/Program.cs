@@ -61,7 +61,7 @@ internal sealed class Suite
         Check(repo.GenericParameters.Single().ConstraintItems.SequenceEqual(new[] { "class", "IEntity", "new()" }), "Generic constraints lost.");
         foreach (var (name, expected) in new[] { ("FindAsync", "Task<(User? user, bool found)>"), ("Echo", "dynamic Echo(dynamic value)"), ("TryGet", "out User? user"), ("Log", "params string[] messages"), ("Connect", "int port = 8080"), ("Name", "get; init;"), ("Count", "private set;"), ("Copy", "byte*") })
             Check(Text(repo.Members.Single(m => m.Name == name)).Contains(expected), name + ": " + Text(repo.Members.Single(m => m.Name == name)));
-        Check(Text(repo.Members.Single(m => m.Name == "FindAsync")).Contains("async"), "Async modifier lost.");
+        Check(Text(repo.Members.Single(m => m.Name == "FindAsync")).StartsWith("public async Task", StringComparison.Ordinal), "Async modifier is not placed after accessibility.");
         Check(Text(repo.Members.Single(m => m.Name == "Copy")).Contains("unsafe"), "Unsafe modifier lost.");
         Check(Text(repo.Members.Single(m => m.Name == "Name")).Contains("required"), "Required modifier lost.");
         foreach (var category in new[] { "Indexers", "Events", "Explicit Interface Implementations" }) Check(repo.Members.Any(m => m.Category == category), category + " missing.");
@@ -146,6 +146,8 @@ internal sealed class Suite
         var options = Options("xml"); await SiteRenderer.RenderAsync(doc, options, options.Output);
         var html = File.ReadAllText(Path.Combine(options.Output, "types", type.Anchor + ".html"));
         Check(!html.Contains("<script>alert(1)</script>") && !html.Contains("href=\"javascript:"), "Unsafe XML rendered.");
+        using var search = JsonDocument.Parse(File.ReadAllText(Path.Combine(options.Output, "search-index.json")));
+        Check(search.RootElement.EnumerateArray().Any(e => e.GetProperty("summary").GetString() == "Runs with Target."), "Search summary lost the see reference name.");
         Check(html.Contains("&lt;script&gt;") && html.Contains("<ul>") && html.Contains("<pre><code>"), "XML structure lost.");
         Check(Example().Types.Single(t => t.Name == "Repository<T>").Members.Single(m => m.Name == "Start").Documentation.Xml.Contains("Starts this service"), "Override inheritdoc failed.");
     }
@@ -155,6 +157,8 @@ internal sealed class Suite
         await SiteRenderer.RenderAsync(Example(), first, first.Output); await SiteRenderer.RenderAsync(Example(), second, second.Output);
         foreach (var file in Directory.GetFiles(first.Output, "*", SearchOption.AllDirectories)) Check(File.ReadAllBytes(file).SequenceEqual(File.ReadAllBytes(Path.Combine(second.Output, Path.GetRelativePath(first.Output, file)))), "Non-deterministic: " + file);
         Check(File.ReadAllText(Path.Combine(first.Output, "markdown/api.md")).Contains("](#s-"), "Single-file links missing.");
+        using var searchIndex = JsonDocument.Parse(File.ReadAllText(Path.Combine(first.Output, "html/search-index.json")));
+        Check(searchIndex.RootElement.EnumerateArray().Any(e => e.GetProperty("summary").GetString() == "Stores values of T."), "Summary lost typeparamref text.");
         Check(File.Exists(Path.Combine(first.Output, "html/assets/search-index.js")) && !File.ReadAllText(Path.Combine(first.Output, "html/assets/search.js")).Contains("fetch("), "Search needs a server.");
         ValidateLinks(Path.Combine(first.Output, "html"), true);
         var multi = Options("multi", "markdown"); await SiteRenderer.RenderAsync(Example(), multi, multi.Output); ValidateLinks(multi.Output, false);
