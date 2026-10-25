@@ -9,7 +9,8 @@ using Microsoft.CodeAnalysis.CSharp;
 using Cli = CodeDocs.Cli.Program;
 
 var runner = new Suite();
-await runner.Run(args.Contains("--unit-only"));
+if (args is ["--export-snapshots", var destination]) await runner.ExportSnapshots(destination);
+else await runner.Run(args.Contains("--unit-only"));
 
 internal sealed class Suite
 {
@@ -25,6 +26,17 @@ internal sealed class Suite
     private SolutionDocument Analyze(string source, Visibility visibility = Visibility.Public) => new SymbolAnalyzer([new("Fixture", "Fixture.csproj", Compile(source))], root, visibility).Analyze("Fixture.csproj");
     private SolutionDocument Example() => Analyze(File.ReadAllText(Path.Combine(root, "samples/Example/Api.cs")).Replace("using System.ComponentModel;", "using System; using System.Threading.Tasks; using System.ComponentModel;"));
     private BuildOptions Options(string name, params string[] formats) => new() { Input = Path.Combine(root, "samples/Example/Example.csproj"), Output = Path.Combine(scratch, name), Formats = formats.Length == 0 ? ["html"] : formats };
+    // Export fixed compiler fixtures for byte-for-byte renderer regression comparisons.
+    public async Task ExportSnapshots(string destination)
+    {
+        var fixtures = new[] { Example(), Analyze(RefinementTests.SemanticSource, Visibility.All), Analyze(RefinementTests.XmlSource, Visibility.All) };
+        for (var i = 0; i < fixtures.Length; i++)
+        {
+            var options = Options("export", "html", "markdown", "json") with { SingleFile = true };
+            await SiteRenderer.RenderAsync(fixtures[i], options, Path.Combine(destination, i.ToString(), "single"));
+            await SiteRenderer.RenderAsync(fixtures[i], options with { SingleFile = false }, Path.Combine(destination, i.ToString(), "multi"));
+        }
+    }
     public async Task Run(bool unitOnly)
     {
         Directory.CreateDirectory(scratch);
@@ -34,6 +46,9 @@ internal sealed class Suite
             ("Stable identity and internal references", () => Sync(Identities)), ("XML documentation and escaping", Documentation),
             ("Deterministic renderers and link integrity", Renderers), ("Snapshot transactions and path guards", Transactions),
             ("CLI configuration and discovery", () => Sync(ConfigurationRules)),
+            ("Associated field attribute targets", () => MaintenanceTests.Attributes((source, visibility) => Analyze(source, visibility), Check, scratch)),
+            ("Independent format renderers", () => MaintenanceTests.Renderers(Example(), Check, scratch)),
+            ("XML preservation and literal escaping", () => MaintenanceTests.Xml(source => Analyze(source), Check, scratch)),
             ("Structured semantic information", () => Sync(() => RefinementTests.Semantics(source => Analyze(source, Visibility.All), Check))),
             ("XML selection, remapping and metadata rendering", () => RefinementTests.Documentation(source => Analyze(source, Visibility.All), Check, scratch))
         };
@@ -157,6 +172,8 @@ internal sealed class Suite
     {
         var first = Options("render1", "html", "markdown", "json") with { SingleFile = true }; var second = first with { Output = Options("render2").Output };
         await SiteRenderer.RenderAsync(Example(), first, first.Output); await SiteRenderer.RenderAsync(Example(), second, second.Output);
+        Check(Directory.GetFiles(first.Output, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(first.Output, f)).Order(StringComparer.Ordinal)
+            .SequenceEqual(Directory.GetFiles(second.Output, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(second.Output, f)).Order(StringComparer.Ordinal)), "Non-deterministic output file set.");
         foreach (var file in Directory.GetFiles(first.Output, "*", SearchOption.AllDirectories)) Check(File.ReadAllBytes(file).SequenceEqual(File.ReadAllBytes(Path.Combine(second.Output, Path.GetRelativePath(first.Output, file)))), "Non-deterministic: " + file);
         Check(File.ReadAllText(Path.Combine(first.Output, "markdown/api.md")).Contains("](#s-"), "Single-file links missing.");
         using var searchIndex = JsonDocument.Parse(File.ReadAllText(Path.Combine(first.Output, "html/search-index.json")));
@@ -182,12 +199,36 @@ internal sealed class Suite
     private async Task Transactions()
     {
         var options = Options("transaction");
+        using (var tx = new OutputTransaction(options))
+        {
+            try { tx.Commit(); throw new Exception("Unrendered output accepted."); }
+            catch (InvalidOperationException) { Check(!Directory.Exists(options.Output), "Unrendered transaction created output."); }
+        }
         using (var tx = new OutputTransaction(options)) { await tx.RenderAsync(Example(), options); tx.Commit(); }
         var entry = Path.Combine(options.Output, "index.html"); var before = File.ReadAllText(entry); var stale = Path.Combine(options.Output, "stale.html"); File.WriteAllText(stale, "stale");
         using (var tx = new OutputTransaction(options)) { await tx.RenderAsync(Analyze("public class Changed {}"), options); }
         Check(File.ReadAllText(entry) == before && File.Exists(stale), "Aborted transaction changed output.");
         using (var tx = new OutputTransaction(options)) { await tx.RenderAsync(Analyze("public class Changed {}"), options); tx.Commit(); }
         Check(!File.Exists(stale), "Snapshot retained deleted files.");
+        var committedBeforeFailure = File.ReadAllText(entry);
+        using (var tx = new OutputTransaction(options))
+        {
+            await tx.RenderAsync(Example(), options);
+            try { await tx.RenderAsync(Example(), options); throw new Exception("Second render accepted."); }
+            catch (InvalidOperationException) { assertions++; }
+            // Removing staging forces the second rename to fail, after the destination was backed up.
+            var stage = Directory.GetDirectories(Path.GetDirectoryName(options.Output)!, ".transaction.codedocs-stage-*").Single();
+            Directory.Delete(stage, true);
+            try { tx.Commit(); throw new Exception("Missing staging accepted."); }
+            catch (IOException) { Check(File.ReadAllText(entry) == committedBeforeFailure, "Failed commit did not restore output."); }
+        }
+        using (var tx = new OutputTransaction(options))
+        {
+            try { await tx.RenderAsync(Example(), options with { Formats = ["unsupported"] }); throw new Exception("Failed renderer accepted."); }
+            catch (ArgumentException) { assertions++; }
+            try { tx.Commit(); throw new Exception("Failed render committed."); }
+            catch (InvalidOperationException) { Check(File.ReadAllText(entry) == committedBeforeFailure, "Failed renderer changed output."); }
+        }
         try { using var tx = new OutputTransaction(options with { Output = root, Clean = true }); throw new Exception("Source accepted."); } catch (ArgumentExceptionWithUsage) { assertions++; }
         var unmanaged = Options("unmanaged").Output; Directory.CreateDirectory(unmanaged); File.WriteAllText(Path.Combine(unmanaged, "keep.txt"), "keep");
         try { using var tx = new OutputTransaction(options with { Output = unmanaged }); throw new Exception("Unmanaged accepted."); } catch (ArgumentExceptionWithUsage) { assertions++; }

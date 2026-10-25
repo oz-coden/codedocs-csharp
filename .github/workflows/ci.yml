@@ -12,11 +12,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
       - run: dotnet build CodeDocs.CSharp.sln -c Release
       - run: dotnet run --project tests/CodeDocs.Tests -c Release --no-build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Export renderer compatibility fixtures
+        run: dotnet run --project tests/CodeDocs.Tests -c Release --no-build -- --export-snapshots artifacts/renderer-fixtures
+      - name: Compare against historical renderer using the same IR
+        run: python scripts/compare_renderer_baseline.py artifacts/renderer-fixtures
       - run: dotnet restore samples/Example/Example.csproj
       - run: dotnet run --project src/CodeDocs.Cli -c Release --no-build -- build samples/Example/Example.csproj --format html --format markdown --format json --single-file -o artifacts/example
       - run: dotnet pack src/CodeDocs.Cli -c Release --no-build -o artifacts/packages

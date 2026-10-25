@@ -91,7 +91,7 @@ internal static class RefinementTests
     }
     private static IEnumerable<DocumentationNode> Descendants(IEnumerable<DocumentationNode> nodes) => nodes.SelectMany(n => new[] { n }.Concat(Descendants(n.Children)));
 
-    private const string SemanticSource = """
+    internal const string SemanticSource = """
         using System;
         [assembly: Tag(typeof(Entry), Mode.One, new int[] { 1 })]
         [module: Tag(typeof(Entry), Mode.One, null)]
@@ -120,7 +120,7 @@ internal static class RefinementTests
         public delegate Entry? Factory([Tag(typeof(Entry), Mode.One, null)] Entry value);
         """;
 
-    private const string XmlSource = """
+    internal const string XmlSource = """
         using System;
         public interface IWorker
         {

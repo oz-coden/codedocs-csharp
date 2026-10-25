@@ -153,6 +153,6 @@ dotnet run --project tests/CodeDocs.Tests -c Release --no-build
 
 テストランナーは解析、可視性、識別子、XML、出力の決定性、内部リンク、安全な置換、設定、MSBuild 読込、不完全な解析のポリシーを検証します。プロセス間通信を利用できない環境では `--unit-only` をテストランナーに指定し、MSBuild 統合テストだけを明示的に除外できます。CI は Linux・Windows の両方で全テストを実行します。
 
-JSON には表示文字列に加え、属性引数の型付き定数・配列・typeof、tuple 要素名、配列の次元、ポインタと関数ポインタの構造、型引数の識別情報、ジェネリック制約、XML ノードと継承元情報を保持します。delegate の引数・戻り値、accessor の引数、アセンブリ・モジュールの属性も対象です。
+JSON には表示文字列に加え、属性引数の型付き定数・配列・typeof、tuple 要素名、配列の次元、ポインタと関数ポインタの構造、型引数の識別情報、ジェネリック制約、XML ノードと継承元情報を保持します。delegate の引数・戻り値、accessor の引数、アセンブリ・モジュールの属性も対象です。自動プロパティ・field-like event・record の positional property の backing field に適用した属性は、対応するメンバの属性として `field:` ターゲット付きで保持・表示します。backing field 自体を公開フィールドとして追加することはありません。
 
 設計と現在の制約は [architecture](docs/architecture.md) と [limitations](docs/limitations.md) を参照してください。

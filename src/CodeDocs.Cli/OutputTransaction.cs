@@ -11,6 +11,8 @@ public sealed class OutputTransaction : IDisposable
     private readonly string staging;
     private readonly FileStream outputLock;
     private bool committed;
+    private bool renderStarted;
+    private bool prepared;
 
     public OutputTransaction(BuildOptions options)
     {
@@ -68,6 +70,8 @@ public sealed class OutputTransaction : IDisposable
     }
     public async Task RenderAsync(SolutionDocument document, BuildOptions options, CancellationToken cancellationToken = default)
     {
+        if (renderStarted) throw new InvalidOperationException("An output transaction can render only once.");
+        renderStarted = true;
         await SiteRenderer.RenderAsync(document, options, staging, cancellationToken);
         var files = Directory.EnumerateFiles(staging, "*", SearchOption.AllDirectories).ToArray();
         if (files.Length == 0 || files.Any(f => new FileInfo(f).Length == 0)) throw new IOException("Rendered output validation failed.");
@@ -79,10 +83,12 @@ public sealed class OutputTransaction : IDisposable
         }
         OutputValidator.Validate(staging);
         File.WriteAllText(Path.Combine(staging, Marker), "{\n  \"generator\": \"CodeDocs.CSharp\",\n  \"version\": \"0.1.0\"\n}\n");
+        prepared = true;
     }
     public void Commit()
     {
         if (committed) throw new InvalidOperationException("Output has already been committed.");
+        if (!prepared) throw new InvalidOperationException("Output must be rendered and validated before commit.");
         var backup = destination + ".codedocs-backup-" + Guid.NewGuid().ToString("N");
         var existed = Directory.Exists(destination);
         if (existed) Directory.Move(destination, backup);

@@ -16,6 +16,7 @@ public sealed class SymbolAnalyzer
     private readonly List<DiagnosticDocument> diagnostics = [];
     private CompilationUnit current = null!;
     private string projectId = "";
+    private AttributeReader attributes = null!;
     private static readonly SymbolDisplayFormat Display = new(
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypes,
         genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters | SymbolDisplayGenericsOptions.IncludeVariance | SymbolDisplayGenericsOptions.IncludeTypeConstraints,
@@ -55,6 +56,7 @@ public sealed class SymbolAnalyzer
         foreach (var unit in units)
         {
             current = unit; projectId = ProjectId(unit);
+            attributes = new AttributeReader(unit.Compilation, TypeRef, Resolve);
             foreach (var diagnostic in unit.Compilation.GetDiagnostics().Where(d => d.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning))
             {
                 var span = diagnostic.Location.GetLineSpan();
@@ -313,7 +315,7 @@ public sealed class SymbolAnalyzer
             ExplicitImplementations = ExplicitSymbols(symbol).Select(s => Resolve(s) ?? s.GetDocumentationCommentId() ?? s.ToDisplayString()).ToArray(),
             Accessors = property is null ? [] : Accessors(property),
             AccessorDetails = AccessorSymbols(symbol).Select(a => new AccessorDocument(a.MethodKind.ToString(), AccessibilityText(a), Attributes(a), Modifiers(a)) { Parameters = a.Parameters.Select(Parameter).ToArray() }).ToArray(),
-            ConstantValue = symbol is IFieldSymbol { HasConstantValue: true } field ? Constant(field.ConstantValue) : null,
+            ConstantValue = symbol is IFieldSymbol { HasConstantValue: true } field ? AttributeReader.Constant(field.ConstantValue) : null,
             Constant = symbol is IFieldSymbol { HasConstantValue: true } constantField ? Value(constantField.Type, constantField.ConstantValue) : null,
             ReturnRefKind = method?.RefKind.ToString() ?? property?.RefKind.ToString(),
             IsExtensionMethod = method?.IsExtensionMethod ?? false,
@@ -332,15 +334,11 @@ public sealed class SymbolAnalyzer
         (m!.DeclaredAccessibility != property.DeclaredAccessibility ? AccessibilityText(m) + " " : "") +
         (m.MethodKind == MethodKind.PropertyGet ? "get;" : m.IsInitOnly ? "init;" : "set;")).ToArray();
     private ParameterDocument Parameter(IParameterSymbol p) => new(p.Name, TypeRef(p.Type), p.RefKind.ToString(), p.ScopedKind.ToString(),
-        p.IsParams, p.IsOptional, p.HasExplicitDefaultValue ? Constant(p.ExplicitDefaultValue) : null, Attributes(p))
+        p.IsParams, p.IsOptional, p.HasExplicitDefaultValue ? AttributeReader.Constant(p.ExplicitDefaultValue) : null, Attributes(p))
     { Default = p.HasExplicitDefaultValue ? Value(p.Type, p.ExplicitDefaultValue) : null };
     private static bool IsPrimary(IMethodSymbol method) => method.MethodKind == MethodKind.Constructor && method.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is TypeDeclarationSyntax { ParameterList: not null });
     private static string Escape(string name) => SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
-    private static string Constant(object? value) => value switch
-    {
-        null => "null", string s => SymbolDisplay.FormatLiteral(s, true), char c => SymbolDisplay.FormatLiteral(c, true),
-        bool b => b ? "true" : "false", IFormattable f => f.ToString(null, CultureInfo.InvariantCulture), _ => value.ToString() ?? "null"
-    };
+
 
     private IReadOnlyList<string> Modifiers(ISymbol symbol)
     {
@@ -387,33 +385,8 @@ public sealed class SymbolAnalyzer
         { ConstraintDetails = details };
     }).ToArray();
 
-    private IReadOnlyList<AttributeDocument> Attributes(ISymbol symbol)
-    {
-        var result = symbol.GetAttributes().Select(a => Attribute(a, "symbol")).ToList();
-        if (symbol is IAssemblySymbol assembly) result.AddRange(assembly.Modules.SelectMany(m => m.GetAttributes()).Select(a => Attribute(a, "module")));
-        if (symbol is IMethodSymbol method) result.AddRange(method.GetReturnTypeAttributes().Select(a => Attribute(a, "return")));
-        return result.OrderBy(a => a.Target, StringComparer.Ordinal).ThenBy(a => a.Display, StringComparer.Ordinal).ToArray();
-    }
-    private AttributeDocument Attribute(AttributeData a, string target) => new(a.ToString() ?? "<unknown>", a.AttributeClass is null ? null : TypeRef(a.AttributeClass), target,
-        a.ConstructorArguments.Select(TypedConstantText).ToArray(),
-        new SortedDictionary<string, string>(a.NamedArguments.ToDictionary(p => p.Key, p => TypedConstantText(p.Value)), StringComparer.Ordinal))
-    {
-        ConstructorId = Resolve(a.AttributeConstructor),
-        ConstructorValues = a.ConstructorArguments.Select(TypedValue).ToArray(),
-        NamedValues = new SortedDictionary<string, ConstantDocument>(a.NamedArguments.ToDictionary(p => p.Key, p => TypedValue(p.Value)), StringComparer.Ordinal)
-    };
-    private ConstantDocument Value(ITypeSymbol? type, object? value) => new(type?.TypeKind == TypeKind.Enum ? "Enum" : "Primitive", type is null ? null : TypeRef(type), Constant(value))
-    { IsNull = value is null, Value = value };
-    private ConstantDocument TypedValue(TypedConstant constant) => new(constant.Kind.ToString(), constant.Type is null ? null : TypeRef(constant.Type), TypedConstantText(constant))
-    {
-        IsNull = constant.IsNull,
-        Value = constant.Kind is TypedConstantKind.Array or TypedConstantKind.Type ? null : constant.Value,
-        ReferencedType = constant.Kind == TypedConstantKind.Type && constant.Value is ITypeSymbol referenced ? TypeRef(referenced) : null,
-        Elements = constant.Kind == TypedConstantKind.Array && !constant.IsNull ? constant.Values.Select(TypedValue).ToArray() : []
-    };
-    private static string TypedConstantText(TypedConstant constant) => constant.Kind == TypedConstantKind.Array
-        ? constant.IsNull ? "null" : "[" + string.Join(", ", constant.Values.Select(TypedConstantText)) + "]"
-        : constant.Kind == TypedConstantKind.Type ? "typeof(" + constant.Value + ")" : Constant(constant.Value);
+    private IReadOnlyList<AttributeDocument> Attributes(ISymbol symbol) => attributes.Read(symbol);
+    private ConstantDocument Value(ITypeSymbol? type, object? value) => attributes.Value(type, value);
 
     private static IEnumerable<Relationship> AttributeRelationships(IEnumerable<AttributeDocument> attributes, string? memberId)
     {
