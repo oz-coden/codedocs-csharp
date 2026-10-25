@@ -65,7 +65,9 @@ internal static class MaintenanceTests
         await SiteRenderer.RenderAsync(malformed, options, Path.Combine(scratch, "malformed-ir"));
         using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
         var cancelledOutput = Path.Combine(scratch, "cancelled-render");
-        try { await SiteRenderer.RenderAsync(doc, options, cancelledOutput, cancelled.Token); throw new Exception("Cancellation ignored."); }
+        var cancelledRender = SiteRenderer.RenderAsync(doc, options, cancelledOutput, cancelled.Token);
+        check(cancelledRender.IsCanceled, "Async renderer did not return a cancelled task.");
+        try { await cancelledRender; throw new Exception("Cancellation ignored."); }
         catch (OperationCanceledException) { check(!Directory.Exists(cancelledOutput), "Cancelled rendering wrote files."); }
         try { await SiteRenderer.RenderAsync(doc, options with { Formats = ["unsupported"] }, Path.Combine(scratch, "invalid-format")); throw new Exception("Unknown format silently ignored."); }
         catch (ArgumentException) { check(true, "Unsupported format rejected."); }

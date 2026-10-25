@@ -10,7 +10,7 @@ public static class SiteRenderer
     public static readonly string[] Categories = Presentation.Categories;
     public static readonly JsonSerializerOptions JsonOptions = JsonRenderer.Options;
 
-    public static Task RenderAsync(SolutionDocument document, BuildOptions options, string destination, CancellationToken cancellationToken = default)
+    public static async Task RenderAsync(SolutionDocument document, BuildOptions options, string destination, CancellationToken cancellationToken = default)
     {
         foreach (var format in options.Formats)
         {
@@ -25,6 +25,6 @@ public static class SiteRenderer
             }
         }
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.CompletedTask;
+        await Task.CompletedTask;
     }
 }
